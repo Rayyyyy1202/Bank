@@ -1,64 +1,66 @@
-import socket
-import aes
-import projecthmac
-import rsa
-import sha1
+from bank import Bank
 
-HOST = '127.0.0.1'
-PORT = 25565
+def main():
+    bank = Bank()
 
+    # Clean start: reset existing accounts
+    bank.accounts.clear()
+    bank.save()
 
-def hmacCheck(hashToCheck, message, key):
-    if not projecthmac.hmacCheck(hashToCheck, message, key):
-        print('Invalid hash. Connection lost.')
-        quit()
+    print("=== Creating accounts ===")
+    try:
+        bank.create_account("Alice", 1000)
+        bank.create_account("Bob", 500)
+        bank.create_account("Charlie", 0)
+    except ValueError as e:
+        print("Account creation error:", e)
 
-def recMsg(socket, size):
-    data = socket.recv(size)
-    return data.decode()
-    
-def sendMessageEnc(msg, hmacKey, aesKey, iv, s):
-    msg = msg + projecthmac.hmac(msg,hmacKey)
-    msg = aes.aes_encrypt(msg, aesKey, iv)
-    s.sendall(msg.encode())
+    print_balances(bank)
 
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:     
-    s.connect((HOST, PORT))
-    print("Welcome to the ATM! You may [c]heck balance, [d]eposit money, or [w]ithdraw money.")
-    p,q,e,d =  rsa.keyGen()
-    n = p*q
-    print(recMsg(s, 4096))
-    
-    msg = str(e)+' '+str(n)
-    s.sendall(msg.encode())
-    
-    # Receive data for keys and decrypt using RSA
-    data = recMsg(s, 4096)
-    keys = rsa.rsa_decrypt(data,[e,n],d)
-    hmacKey = keys[:16]
-    aesKey = keys[16:32]
-    iv = keys[32:]
-    
-    hmacCheck(keys[-40:], keys[:-40], hmacKey)
-    
-    username = input("Enter username: ")
-    sendMessageEnc(username, hmacKey, aesKey, iv, s)
-    
-    auth = recMsg(s, 4096)
-    auth = aes.aes_decrypt(auth,aesKey,iv).strip()
-    
-    hmacCheck(auth[-40:], auth[:-40], hmacKey)
-    
-    print(auth[:-40])
-    
-    while True:
-        userIn = input("Enter command: ")
-        sendMessageEnc(userIn, hmacKey, aesKey, iv, s)
-        response = recMsg(s, 4096)
-        response = aes.aes_decrypt(response,aesKey,iv).strip()
-        hmacCheck(response[-40:], response[:-40], hmacKey)
-        print(response[:-40])
-    
-# A haiku right here
-# A greeting from another
-# For someone unknown
+    print("\n=== Depositing Money ===")
+    bank.deposit("Alice", 200)
+    bank.deposit("Charlie", 50)
+    print_balances(bank)
+
+    print("\n=== Withdrawing Money ===")
+    try:
+        bank.withdraw("Bob", 100)
+        bank.withdraw("Charlie", 100)  # Should raise ValueError
+    except ValueError as e:
+        print("Withdraw error:", e)
+    print_balances(bank)
+
+    print("\n=== Transferring Money ===")
+    try:
+        bank.transfer("Alice", "Bob", 300)
+        bank.transfer("Bob", "Charlie", 200)
+        bank.transfer("Alice", "Alice", 100)  # Should raise error
+    except ValueError as e:
+        print("Transfer error:", e)
+    print_balances(bank)
+
+    print("\n=== Invalid Operations ===")
+    try:
+        bank.deposit("Ghost", 50)
+    except ValueError as e:
+        print("Expected error (deposit to non-existent):", e)
+
+    try:
+        bank.withdraw("Ghost", 10)
+    except ValueError as e:
+        print("Expected error (withdraw from non-existent):", e)
+
+    try:
+        bank.create_account("Alice", 100)
+    except ValueError as e:
+        print("Expected error (duplicate account):", e)
+
+    print("\n=== Final Balances ===")
+    print_balances(bank)
+
+def print_balances(bank):
+    for name, acc in bank.accounts.items():
+        print("%s: $%.2f" % (name, acc.balance))
+
+if __name__ == "__main__":
+    main()
